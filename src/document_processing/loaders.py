@@ -16,6 +16,8 @@ from typing import List, Optional, Dict, Any
 import openpyxl
 from pptx import Presentation
 from langchain.schema.document import Document
+from urllib.parse import quote, unquote
+import hashlib
 
 from ..core.config import CACHE_DIR
 from ..utils.aikipedia_api import get_aikipedia_client, DEFAULT_IMAGE_DESCRIPTION_PROMPT
@@ -24,22 +26,71 @@ def download_file(url: str) -> Optional[str]:
     """Download a file from URL and return local path"""
     print(f"📥 Downloading document from {url}...")
     try:
-        # Use a timeout to prevent hanging on very large files
-        with requests.get(url, stream=True, timeout=300) as r: # 5 minute timeout
+        # Fix URL encoding issues
+        if ' ' in url or '%20' not in url:
+            # URL encode spaces and special characters
+            parts = url.split('/')
+            encoded_parts = []
+            for i, part in enumerate(parts):
+                if i < 3:  # Don't encode protocol and domain
+                    encoded_parts.append(part)
+                else:
+                    encoded_parts.append(quote(unquote(part), safe=''))
+            url = '/'.join(encoded_parts)
+            print(f"🔧 Fixed URL encoding: {url}")
+        
+        # Better headers to avoid blocking
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/pdf,application/vnd.openxmlformats-officedocument.*,*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive'
+        }
+        
+        # Use session for better connection handling
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        with session.get(url, stream=True, timeout=60, allow_redirects=True) as r:
             r.raise_for_status()
-            # Sanitize filename
-            file_name = "".join(c for c in Path(url).name.split('?')[0] if c.isalnum() or c in ('.', '_', '-')).rstrip()
-            if not file_name: # handle cases where URL ends in /
-                import hashlib
-                file_name = hashlib.md5(url.encode()).hexdigest()
+            
+            # Generate safe filename with proper extension
+            original_name = Path(unquote(url)).name.split('?')[0]
+            
+            # Extract extension first
+            name_parts = original_name.rsplit('.', 1)
+            if len(name_parts) == 2:
+                base_name, extension = name_parts
+                extension = '.' + extension.lower()
+            else:
+                base_name = original_name
+                extension = '.pdf'  # Default to PDF
+            
+            # Clean the base name
+            safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
+            clean_base = ''.join(c if c in safe_chars else '_' for c in base_name)
+            
+            if not clean_base or len(clean_base) < 3:
+                clean_base = hashlib.md5(url.encode()).hexdigest()[:12]
+            
+            file_name = clean_base + extension
+            
             local_filename = CACHE_DIR / file_name
+            print(f"💾 Saving as: {file_name}")
+            
             with open(local_filename, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        print(f"✅ Download complete: {local_filename}")
+                    if chunk:
+                        f.write(chunk)
+                        
+        print(f"✅ Download complete: {local_filename} (Extension: {Path(file_name).suffix})")
         return str(local_filename)
+        
     except requests.exceptions.RequestException as e:
         print(f"❌ Error downloading file: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error downloading {url}: {e}")
         return None
 
 def load_pdf_with_pymupdf(file_path: str, url: str) -> List[Document]:

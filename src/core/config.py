@@ -14,11 +14,13 @@ load_dotenv()
 @dataclass
 class APIConfig:
     """API endpoints and authentication"""
-    openrouter_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    gemini_key: str = os.getenv("GEMINI_API_KEY", "")
+    openrouter_key: str = os.getenv("OPENROUTER_API_KEY", "")  # Keep for backward compatibility
     site_url: str = os.getenv("YOUR_SITE_URL", "")
     site_name: str = os.getenv("YOUR_SITE_NAME", "")
     user_id: str = os.getenv("USER_ID", "a03073d5-aabf-4306-9efa-bb5d93d95ad7")
     base_url: str = "https://backend.aikipedia.workers.dev"
+    gemini_url: str = "https://generativelanguage.googleapis.com/v1beta/models"
     openrouter_url: str = "https://openrouter.ai/api/v1/chat/completions"
     aikipedia_chat_url: str = "https://backend.aikipedia.workers.dev/chat"
     flight_api_url: str = "https://register.hackrx.in/submissions/myFavouriteCity"
@@ -32,14 +34,14 @@ class APIConfig:
 @dataclass
 class ModelConfig:
     """AI model specifications"""
-    embedding_model: str = "BAAI/bge-m3"
-    reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    llm_model: str = "anthropic/claude-3.5-sonnet"
-    llm_vision_model: str = "anthropic/claude-3-haiku:beta"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    reranker_model: str = "jinaai/jina-reranker-v1-tiny-en"
+    llm_model: str = "gemini-1.5-flash"
+    llm_vision_model: str = "gemini-1.5-flash"
     embedding_dim: int = 1024
     max_seq_length: int = 8192
-    batch_size: int = 32
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    batch_size: int = 16  # Reduced for CPU optimization
+    device: str = "cpu"  # Force CPU for MacBook optimization
     trust_remote_code: bool = True
 
 @dataclass
@@ -119,11 +121,9 @@ class SystemConfig:
     
     def _validate_config(self) -> None:
         """Validate critical configuration"""
-        if not self.api.openrouter_key:
-            print("⚠️ Warning: OPENROUTER_API_KEY not found")
-        if self.models.device == "cuda" and not torch.cuda.is_available():
-            print("⚠️ Warning: CUDA requested but not available, falling back to CPU")
-            self.models.device = "cpu"
+        if not self.api.gemini_key:
+            print("⚠️ Warning: GEMINI_API_KEY not found")
+        print("💻 Optimized for MacBook/CPU usage")
     
     def get_model_config(self) -> Dict[str, Any]:
         """Get model configuration for AI components"""
@@ -137,6 +137,13 @@ class SystemConfig:
     
     def get_api_headers(self) -> Dict[str, str]:
         """Get API headers for external requests"""
+        return {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api.gemini_key
+        }
+    
+    def get_openrouter_headers(self) -> Dict[str, str]:
+        """Get OpenRouter headers for fallback"""
         return {
             "Authorization": f"Bearer {self.api.openrouter_key}",
             "HTTP-Referer": self.api.site_url,
@@ -204,6 +211,7 @@ class SystemConfig:
 config = SystemConfig()
 
 # Legacy compatibility exports
+GEMINI_API_KEY = config.api.gemini_key
 OPENROUTER_API_KEY = config.api.openrouter_key
 USER_ID = config.api.user_id
 API_BASE_URL = config.api.base_url
@@ -211,7 +219,6 @@ YOUR_SITE_URL = config.api.site_url
 YOUR_SITE_NAME = config.api.site_name
 EMBEDDING_MODEL_NAME = config.models.embedding_model
 RERANKER_MODEL_NAME = config.models.reranker_model
-API_BASE_URL = config.api.base_url
 SMALL_DOC_TOKEN_THRESHOLD = config.processing.small_doc_threshold
 CACHE_DIR = config.paths.cache_dir
 LOG_DIR = config.paths.log_dir

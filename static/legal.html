@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LegalEase AI - Legal Document Simplifier</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚖️ LegalEase AI</h1>
+            <p>Demystify Complex Legal Documents with AI • Powered by Google Gemini</p>
+            <div class="language-selector">
+                <select id="languageSelect">
+                    <option value="en">🇺🇸 English</option>
+                    <option value="es">🇪🇸 Español</option>
+                    <option value="fr">🇫🇷 Français</option>
+                    <option value="de">🇩🇪 Deutsch</option>
+                    <option value="it">🇮🇹 Italiano</option>
+                    <option value="pt">🇵🇹 Português</option>
+                    <option value="hi">🇮🇳 हिन्दी</option>
+                    <option value="zh">🇨🇳 中文</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="upload-section">
+            <div class="card">
+                <h3>📄 Upload Legal Document</h3>
+                <div class="upload-area" id="uploadArea">
+                    <p>Drop legal documents here or</p>
+                    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">Choose File</button>
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.txt" multiple>
+                    <p class="file-types">Supports: Contracts, Agreements, Terms of Service, Legal PDFs</p>
+                </div>
+                
+                <p class="divider">OR</p>
+                
+                <input type="url" class="url-input" id="urlInput" placeholder="Enter document URL (https://...)">
+                <div id="fileInfo"></div>
+                
+                <button class="analyze-btn" id="analyzeBtn" onclick="analyzeDocument()">🔍 Analyze Document</button>
+            </div>
+        </div>
+
+        <div class="main-content" id="mainContent" style="display: none;">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="showTab('simplified')">📝 Simplified View</button>
+                <button class="tab-btn" onclick="showTab('risks')">⚠️ Risk Analysis</button>
+                <button class="tab-btn" onclick="showTab('qa')">❓ Q&A</button>
+            </div>
+
+            <div class="tab-content" id="simplifiedTab">
+                <div class="document-viewer">
+                    <div class="risk-summary" id="riskSummary"></div>
+                    <div class="simplified-content" id="simplifiedContent"></div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="risksTab" style="display: none;">
+                <div class="risks-container" id="risksContainer"></div>
+            </div>
+
+            <div class="tab-content" id="qaTab" style="display: none;">
+                <div class="qa-section">
+                    <div class="preset-questions">
+                        <h4>💡 Common Legal Questions</h4>
+                        <div class="question-buttons">
+                            <button class="preset-btn" onclick="askQuestion('What are the main risks in this document?')">What are the main risks?</button>
+                            <button class="preset-btn" onclick="askQuestion('Can I cancel this contract early?')">Can I cancel early?</button>
+                            <button class="preset-btn" onclick="askQuestion('What fees am I responsible for?')">What fees apply?</button>
+                            <button class="preset-btn" onclick="askQuestion('Are there any automatic renewals?')">Auto renewals?</button>
+                            <button class="preset-btn" onclick="askQuestion('What are my main obligations?')">My obligations?</button>
+                            <button class="preset-btn" onclick="askQuestion('What happens if I breach this contract?')">Breach consequences?</button>
+                        </div>
+                    </div>
+                    
+                    <div class="custom-question">
+                        <h4>🤔 Ask Your Own Question</h4>
+                        <div class="question-input-group">
+                            <input type="text" id="customQuestion" placeholder="Ask anything about this legal document..." onkeypress="handleQuestionEnter(event)">
+                            <button onclick="askCustomQuestion()">Ask</button>
+                        </div>
+                    </div>
+                    
+                    <div class="qa-results" id="qaResults"></div>
+                </div>
+            </div>
+
+
+        </div>
+
+        <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+            <div class="loading-content">
+                <div class="spinner"></div>
+                <p id="loadingText">Analyzing legal document with AI...</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

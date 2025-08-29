@@ -12,6 +12,7 @@ from typing import List
 from .loaders import download_file, get_document_loader
 from ..utils.cache import load_from_cache, save_to_cache
 from ..ai.embedding_models import get_embed_model
+from ..core.config import config
 
 
 
@@ -60,8 +61,9 @@ def load_and_process_document(url: str):
     processed_metadatas = [chunk.metadata for chunk in chunks]
 
     embed_model = get_embed_model()
-    print(f"🧠 Embedding {len(processed_texts)} chunks...")
-    embeddings = embed_model.encode(processed_texts, batch_size=32, show_progress_bar=True)
+    print(f"🧠 Embedding {len(processed_texts)} chunks (MacBook CPU optimized)...")
+    # Use smaller batch size for CPU optimization on MacBook
+    embeddings = embed_model.encode(processed_texts, batch_size=config.models.batch_size, show_progress_bar=True)
     embeddings_np = np.array(embeddings).astype("float32")
 
     dimension = embeddings_np.shape[1]

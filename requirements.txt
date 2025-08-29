@@ -1,0 +1,54 @@
+# Core Framework
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+aiofiles
+
+# AI/ML Components
+torch
+sentence-transformers
+transformers
+faiss-cpu
+numpy
+
+# HTTP Client
+httpx
+
+# Document Processing
+PyMuPDF
+python-docx
+python-pptx
+openpyxl
+beautifulsoup4
+lxml
+
+# LangChain
+langchain
+langchain-community
+
+# Text Processing
+tiktoken
+rank-bm25
+
+# Environment & Configuration
+python-dotenv
+
+# Utilities
+rich
+pathlib2
+asyncio
+
+# Development & Testing
+pytest
+pytest-asyncio
+
+# Optional: Jupyter for experimentation
+jupyter
+notebook
+
+# Security
+cryptography
+
+# File handling
+python-multipart

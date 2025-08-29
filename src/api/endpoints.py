@@ -12,14 +12,17 @@ from typing import List, Dict, Any
 from pathlib import Path
 from pptx import Presentation
 
-from ..models.schemas import HackathonRequest
-from ..ai import get_embed_model, get_reranker_model, STRICT_CONTEXT_SYSTEM_PROMPT, FULL_TEXT_SYSTEM_PROMPT, IMAGE_SYSTEM_PROMPT, get_document_system_prompt
+from ..models.schemas import HackathonRequest, LegalAnalysisRequest
+from ..ai import get_embed_model, get_reranker_model, STRICT_CONTEXT_SYSTEM_PROMPT, FULL_TEXT_SYSTEM_PROMPT, IMAGE_SYSTEM_PROMPT, get_document_system_prompt, get_legal_prompt
+from ..ai.gemini_client import generate_text_with_gemini, analyze_image_with_gemini
 from ..document_processing import load_and_process_document, get_processed_data
 from ..utils import (
     check_for_secret_token_url, log_request_and_response, clean_text_for_llm
 )
+from ..utils.legal_analyzer import legal_analyzer
+from ..ai.prompts import get_legal_prompt
 from ..utils.terminal_ui import log_request_start, log_request_complete, create_request_progress
-from ..core.config import OPENROUTER_API_KEY, YOUR_SITE_URL, YOUR_SITE_NAME, SMALL_DOC_TOKEN_THRESHOLD, USER_ID, API_BASE_URL, CACHE_DIR, config
+from ..core.config import GEMINI_API_KEY, OPENROUTER_API_KEY, YOUR_SITE_URL, YOUR_SITE_NAME, SMALL_DOC_TOKEN_THRESHOLD, USER_ID, API_BASE_URL, CACHE_DIR, config
 
 # Initialize thread executor
 executor = ThreadPoolExecutor(max_workers=os.cpu_count())
@@ -28,61 +31,15 @@ executor = ThreadPoolExecutor(max_workers=os.cpu_count())
 llm_semaphore = asyncio.Semaphore(config.api.llm_semaphore_limit)
 image_api_semaphore = asyncio.Semaphore(config.api.image_semaphore_limit)
 
-async def rate_limited_llm_call(client: httpx.AsyncClient, payload: dict) -> str:
-    """Make rate-limited LLM API call"""
+async def rate_limited_llm_call(prompt: str, system_prompt: str = "") -> str:
+    """Make rate-limited Gemini API call"""
     async with llm_semaphore:
-        try:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            # Only add optional headers if they exist
-            if YOUR_SITE_URL:
-                headers["HTTP-Referer"] = YOUR_SITE_URL
-            if YOUR_SITE_NAME:
-                headers["X-Title"] = YOUR_SITE_NAME
-                
-            response = await client.post(
-                url=config.api.openrouter_url,
-                json=payload,
-                headers=headers,
-                timeout=config.api.llm_timeout
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except httpx.TimeoutException:
-            return f"Error: Request timed out after {config.api.llm_timeout} seconds."
-        except httpx.HTTPStatusError as e:
-            return f"Error: HTTP {e.response.status_code} - {e.response.text}"
-        except Exception as e:
-            return f"Error: {str(e)}"
+        return await generate_text_with_gemini(prompt, system_prompt)
 
-async def rate_limited_image_call(client: httpx.AsyncClient, payload: dict) -> str:
-    """Make rate-limited image API call"""
+async def rate_limited_image_call(image_url: str, prompt: str, system_prompt: str = "") -> str:
+    """Make rate-limited Gemini Vision API call"""
     async with image_api_semaphore:
-        try:
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            # Only add optional headers if they exist
-            if YOUR_SITE_URL:
-                headers["HTTP-Referer"] = YOUR_SITE_URL
-            if YOUR_SITE_NAME:
-                headers["X-Title"] = YOUR_SITE_NAME
-                
-            response = await client.post(
-                url=config.api.openrouter_url,
-                json=payload,
-                headers=headers,
-                timeout=config.api.llm_timeout
-            )
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            return f"Error processing image: {str(e)}"
+        return await analyze_image_with_gemini(image_url, prompt, system_prompt)
 
 def count_tokens(text: str) -> int:
     """Count tokens in text"""
@@ -138,47 +95,34 @@ def load_pptx_file(file_path: str) -> List[Dict[str, Any]]:
         print(f"❌ Error loading PPTX: {e}")
     return presentation_content
 
-async def upload_image_get_link_then_delete(image_path: str, user_id: str, question: str, model: str = None) -> str:
-    """Upload, analyze, and delete image via external API"""
-    filename = os.path.basename(image_path)
-    
+async def analyze_local_image_with_gemini(image_path: str, question: str) -> str:
+    """Analyze local image using Gemini Vision API"""
     try:
-        with open(image_path, "rb") as f:
-            image_data = f.read()
-        base64_image = "data:image/png;base64," + base64.b64encode(image_data).decode()
+        # Upload image to temporary service to get URL (simplified approach)
+        async with httpx.AsyncClient() as client:
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+            base64_image = "data:image/png;base64," + base64.b64encode(image_data).decode()
+            
+            # Upload to get public URL
+            upload_payload = {"image_base64": base64_image, "filename": os.path.basename(image_path), "user_id": USER_ID}
+            upload_response = await client.post(f"{API_BASE_URL}/upload-image", json=upload_payload, timeout=60)
+            upload_response.raise_for_status()
+            upload_json = upload_response.json()
+            public_url = upload_json["url"]
+            storage_path = upload_json["storage_path"]
+            
+            # Analyze with Gemini
+            result = await analyze_image_with_gemini(public_url, question)
+            
+            # Clean up
+            delete_payload = {"storage_path": storage_path, "user_id": USER_ID}
+            await client.post(f"{API_BASE_URL}/delete-image", json=delete_payload, timeout=60)
+            
+            return result
+            
     except Exception as e:
-        return f"Failed to read and encode image: {e}"
-    
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient() as client:
-                # Upload Image
-                upload_payload = {"image_base64": base64_image, "filename": filename, "user_id": user_id}
-                upload_response = await client.post(f"{API_BASE_URL}/upload-image", json=upload_payload, timeout=60)
-                upload_response.raise_for_status()
-                upload_json = upload_response.json()
-                public_url = upload_json["url"]
-                storage_path = upload_json["storage_path"]
-                
-                # Analyze with AI
-                chat_payload = {"message": question, "user_id": user_id, "model": config.models.llm_vision_model, "image_url": public_url, "history": [], "systemPrompt": ""}
-                chat_response = await client.post(f"{API_BASE_URL}/chat", json=chat_payload, timeout=60)
-                chat_json = chat_response.json()
-                
-                # Delete image
-                delete_payload = {"storage_path": storage_path, "user_id": user_id}
-                await client.post(f"{API_BASE_URL}/delete-image", json=delete_payload, timeout=60)
-                
-                if chat_response.status_code == 200:
-                    return chat_json.get("response", "No response returned")
-                else:
-                    raise httpx.HTTPStatusError(f"Chat API failed with status {chat_response.status_code}", request=chat_response.request, response=chat_response)
-        except Exception as e:
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-            else:
-                return f"API Error after {max_retries} attempts: {e}"
+        return f"Error analyzing image: {str(e)}"
 
 async def answer_questions_from_pptx(questions: List[str], pptx_content: List[Dict[str, Any]]) -> List[str]:
     """Builds comprehensive context from PPTX text and image analysis, then answers questions"""
@@ -193,9 +137,8 @@ async def answer_questions_from_pptx(questions: List[str], pptx_content: List[Di
         for image_path in slide["image_paths"]:
             if image_path not in image_descriptions:
                 image_descriptions[image_path] = None  # Placeholder
-                task = upload_image_get_link_then_delete(
+                task = analyze_local_image_with_gemini(
                     image_path=image_path,
-                    user_id=USER_ID,
                     question=description_prompt
                 )
                 image_analysis_tasks.append((image_path, task))
@@ -230,60 +173,24 @@ async def answer_questions_from_pptx(questions: List[str], pptx_content: List[Di
     return await answer_questions_from_context(questions, full_context, ".pptx")
 
 async def answer_questions_from_context(questions: List[str], context: str, file_extension: str = None) -> List[str]:
-    """Answer questions using provided context with document-specific prompts"""
-    # Get document-specific system prompt
-    system_prompt = get_document_system_prompt(file_extension) if file_extension else STRICT_CONTEXT_SYSTEM_PROMPT
+    """Answer questions using provided context with legal-specific prompts"""
+    # Use legal simplification prompt for better legal document understanding
+    legal_prompt = get_legal_prompt('simplify')
+    system_prompt = f"{legal_prompt}\n\nWhen answering questions, provide clear, practical explanations that help users understand their legal rights and obligations."
     
-    async with httpx.AsyncClient() as client:
-        tasks = []
-        for question in questions:
-            payload = {
-                "model": config.models.llm_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"}
-                ],
-                "max_tokens": 1000,
-                "temperature": 0.1
-            }
-            tasks.append(rate_limited_llm_call(client, payload))
-        
-        return await asyncio.gather(*tasks)
+    print(f"💬 Processing {len(questions)} questions with context ({len(context)} chars)...")
+    
+    tasks = []
+    for i, question in enumerate(questions):
+        prompt = f"Document context:\n{context[:6000]}{'...' if len(context) > 6000 else ''}\n\nQuestion: {question}\n\nAnswer in simple terms:"
+        print(f"🔍 [{i+1}/{len(questions)}] Question: {question[:50]}...")
+        tasks.append(rate_limited_llm_call(prompt, system_prompt))
+    
+    return await asyncio.gather(*tasks)
 
-async def process_image_question(image_url: str, question: str, client: httpx.AsyncClient) -> str:
-    """Process question about an image using vision API"""
-    try:
-        payload = {
-            "user_id": USER_ID,
-            "message": question,
-            "model": config.models.llm_vision_model,
-            "image_url": image_url,
-            "history": [],
-            "systemPrompt": IMAGE_SYSTEM_PROMPT
-        }
-        
-        response = await client.post(
-            config.api.aikipedia_chat_url,
-            json=payload,
-            timeout=config.api.llm_timeout
-        )
-        response.raise_for_status()
-        
-        result = response.json()
-        # Extract the response content from the API response
-        if isinstance(result, dict) and 'response' in result:
-            return result['response']
-        elif isinstance(result, dict) and 'message' in result:
-            return result['message']
-        else:
-            return str(result)
-            
-    except httpx.TimeoutException:
-        return f"Error: Image processing request timed out after {config.api.llm_timeout} seconds."
-    except httpx.HTTPStatusError as e:
-        return f"Error: HTTP {e.response.status_code} - {e.response.text}"
-    except Exception as e:
-        return f"Error processing image: {str(e)}"
+async def process_image_question(image_url: str, question: str) -> str:
+    """Process question about an image using Gemini Vision API"""
+    return await rate_limited_image_call(image_url, question, IMAGE_SYSTEM_PROMPT)
 
 async def retrieve_contexts_for_questions(questions: List[str], top_k: int = 10) -> List[str]:
     """Retrieve contexts for multiple questions using batch embeddings"""
@@ -298,9 +205,9 @@ async def retrieve_contexts_for_questions(questions: List[str], top_k: int = 10)
     embed_model = get_embed_model()
     reranker_model = get_reranker_model()
     
-    # Batch embed all questions at once (limit to 4)
-    print("🧠 Batch embedding all questions...")
-    question_embeddings = embed_model.encode(questions, batch_size=min(4, len(questions)))
+    # Batch embed all questions at once (CPU optimized for MacBook)
+    print("🧠 Batch embedding all questions (MacBook CPU optimized)...")
+    question_embeddings = embed_model.encode(questions, batch_size=min(config.models.batch_size, len(questions)))
     question_embeddings_np = question_embeddings.astype("float32")
     
     # Process all questions in parallel
@@ -362,11 +269,11 @@ async def retrieve_contexts_for_questions(questions: List[str], top_k: int = 10)
     print(f"✅ Batch processing complete for {len(questions)} questions")
     return contexts
 
-async def process_questions_with_rag(questions: List[str], doc_url: str, client: httpx.AsyncClient) -> List[str]:
-    """Process multiple questions using batch RAG pipeline"""
-    # Get file extension from URL
-    file_extension = Path(doc_url.split('?')[0]).suffix.lower()
-    system_prompt = get_document_system_prompt(file_extension)
+async def process_questions_with_rag(questions: List[str], doc_url: str) -> List[str]:
+    """Process multiple questions using batch RAG pipeline with legal focus"""
+    # Use legal-specific prompts for better legal document Q&A
+    legal_prompt = get_legal_prompt('simplify')
+    system_prompt = f"{legal_prompt}\n\nFocus on practical legal implications and user rights when answering questions."
     
     # Batch retrieve contexts for all questions
     contexts = await retrieve_contexts_for_questions(questions, top_k=10)
@@ -374,40 +281,28 @@ async def process_questions_with_rag(questions: List[str], doc_url: str, client:
     # Process each question with its context
     tasks = []
     for question, context in zip(questions, contexts):
+        print(f"🔍 Processing question: {question[:50]}... (context: {len(context)} chars)")
         if not context:
             tasks.append(asyncio.create_task(asyncio.sleep(0, result="I couldn't find relevant information in the document to answer this question.")))
         else:
-            payload = {
-                "model": config.models.llm_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"}
-                ],
-                "max_tokens": 1000,
-                "temperature": 0.1
-            }
-            tasks.append(rate_limited_llm_call(client, payload))
+            prompt = f"Document context:\n{context[:6000]}{'...' if len(context) > 6000 else ''}\n\nQuestion: {question}\n\nAnswer in simple terms:"
+            tasks.append(rate_limited_llm_call(prompt, system_prompt))
     
     return await asyncio.gather(*tasks)
 
-async def process_questions_with_full_text(questions: List[str], full_text: str, doc_url: str, client: httpx.AsyncClient) -> List[str]:
-    """Process multiple questions using full text with document-specific prompts"""
-    # Get file extension from URL
-    file_extension = Path(doc_url.split('?')[0]).suffix.lower()
-    system_prompt = get_document_system_prompt(file_extension)
+async def process_questions_with_full_text(questions: List[str], full_text: str, doc_url: str) -> List[str]:
+    """Process multiple questions using full text with legal-specific prompts"""
+    # Use legal-specific prompts for better legal document understanding
+    legal_prompt = get_legal_prompt('simplify')
+    system_prompt = f"{legal_prompt}\n\nProvide practical, actionable answers that help users understand their legal rights and obligations."
+    
+    print(f"💬 Processing {len(questions)} questions with full text ({len(full_text)} chars)...")
     
     tasks = []
-    for question in questions:
-        payload = {
-            "model": config.models.llm_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"DOCUMENT_TEXT:\n{full_text}\n\nQUESTION: {question}"}
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.1
-        }
-        tasks.append(rate_limited_llm_call(client, payload))
+    for i, question in enumerate(questions):
+        prompt = f"Document:\n{full_text[:8000]}{'...' if len(full_text) > 8000 else ''}\n\nQuestion: {question}\n\nAnswer in simple terms:"
+        print(f"🔍 [{i+1}/{len(questions)}] Question: {question[:50]}...")
+        tasks.append(rate_limited_llm_call(prompt, system_prompt))
     
     return await asyncio.gather(*tasks)
 
@@ -527,19 +422,18 @@ async def hackathon_endpoint(request: HackathonRequest):
                 progress.update_step("❓ Processing", "Processing image questions")
                 progress.set_main_progress(70)
                 
-                async with httpx.AsyncClient() as client:
-                    # Create tasks for parallel image processing
-                    async def process_single_image_question(i: int, question: str):
-                        progress.update_question_progress(i, len(questions), f"Processing image: {question[:50]}...")
-                        answer = await process_image_question(doc_url, question, client)
-                        progress.update_question_progress(i + 1, len(questions), f"Completed image: {question[:50]}...")
-                        return answer
-                    
-                    # Process all image questions concurrently
-                    tasks = [process_single_image_question(i, question) for i, question in enumerate(questions)]
-                    answers = await asyncio.gather(*tasks)
-                    
-                    progress.update_question_progress(len(questions), len(questions), "All questions completed")
+                # Create tasks for parallel image processing
+                async def process_single_image_question(i: int, question: str):
+                    progress.update_question_progress(i, len(questions), f"Processing image: {question[:50]}...")
+                    answer = await process_image_question(doc_url, question)
+                    progress.update_question_progress(i + 1, len(questions), f"Completed image: {question[:50]}...")
+                    return answer
+                
+                # Process all image questions concurrently
+                tasks = [process_single_image_question(i, question) for i, question in enumerate(questions)]
+                answers = await asyncio.gather(*tasks)
+                
+                progress.update_question_progress(len(questions), len(questions), "All questions completed")
                 
                 duration = time.time() - start_time
                 progress.complete()
@@ -580,15 +474,16 @@ async def hackathon_endpoint(request: HackathonRequest):
             progress.update_step("❓ Processing", "Generating answers for all questions")
             progress.set_main_progress(70)
             
-            async with httpx.AsyncClient() as client:
-                if use_full_text:
-                    # Batch process all questions with full text
-                    progress.update_question_progress(0, len(questions), "Processing all questions with full text...")
-                    answers = await process_questions_with_full_text(questions, full_text, doc_url, client)
-                else:
-                    # Batch process all questions with RAG
-                    progress.update_question_progress(0, len(questions), "Processing all questions with RAG...")
-                    answers = await process_questions_with_rag(questions, doc_url, client)
+            if use_full_text:
+                # Batch process all questions with full text
+                print("📄 Q&A Strategy: Full text (small document)")
+                progress.update_question_progress(0, len(questions), "Processing all questions with full text...")
+                answers = await process_questions_with_full_text(questions, full_text, doc_url)
+            else:
+                # Batch process all questions with RAG pipeline
+                print("🔍 Q&A Strategy: RAG pipeline (targeted retrieval)")
+                progress.update_question_progress(0, len(questions), "Processing all questions with RAG...")
+                answers = await process_questions_with_rag(questions, doc_url)
                 
                 progress.update_question_progress(len(questions), len(questions), "All questions completed")
             
@@ -615,3 +510,108 @@ async def hackathon_endpoint(request: HackathonRequest):
             log_request_complete(False, duration)
         print(f"❌ Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+async def legal_analysis_endpoint(request: LegalAnalysisRequest):
+    """Legal document analysis endpoint with complete analysis"""
+    try:
+        doc_url = str(request.document_url)
+        language = request.language or 'en'
+        
+        # Load and process document
+        await asyncio.get_event_loop().run_in_executor(executor, load_and_process_document, doc_url)
+        faiss_index, processed_texts, processed_metadatas = get_processed_data()
+        
+        if not processed_texts:
+            raise HTTPException(status_code=400, detail="Could not process document")
+        
+        # Combine all text for FULL CONTEXT analysis
+        full_text = "\n\n".join(processed_texts)
+        
+        print(f"🔍 Using FULL CONTEXT strategy for legal analysis in {language}...")
+        print(f"📄 Document size: {len(full_text)} chars, {len(processed_texts)} chunks")
+        print("🧠 Sending ENTIRE document to Gemini for comprehensive analysis...")
+        
+        # Perform comprehensive legal analysis using FULL document context
+        analysis = await legal_analyzer.analyze_document(full_text, language)
+        
+        # Add processing stats
+        analysis['document_stats'] = {
+            'total_length': len(full_text),
+            'chunks_processed': len(processed_texts),
+            'risk_count': len(analysis['risks']),
+            'analysis_method': 'full_context_gemini'
+        }
+        
+        print(f"✅ Full context analysis complete!")
+        
+        return {
+            "analysis": analysis,
+            "document_url": doc_url,
+            "language": language,
+            "processing_method": "full_context_gemini"
+        }
+        
+    except Exception as e:
+        print(f"❌ Legal analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Legal analysis error: {str(e)}")
+
+async def simplify_document_endpoint(request: LegalAnalysisRequest):
+    """Document simplification endpoint"""
+    try:
+        doc_url = str(request.document_url)
+        language = request.language or 'en'
+        
+        # Load and process document
+        await asyncio.get_event_loop().run_in_executor(executor, load_and_process_document, doc_url)
+        faiss_index, processed_texts, processed_metadatas = get_processed_data()
+        
+        if not processed_texts:
+            raise HTTPException(status_code=400, detail="Could not process document")
+        
+        # Combine all text
+        full_text = "\n\n".join(processed_texts)
+        
+        # Simplify document
+        simplified = await legal_analyzer.simplify_document(full_text, language)
+        
+        return {
+            "original_text": full_text,
+            "simplified_text": simplified,
+            "document_url": doc_url,
+            "language": language
+        }
+        
+    except Exception as e:
+        print(f"❌ Simplification error: {e}")
+        raise HTTPException(status_code=500, detail=f"Simplification error: {str(e)}")
+
+async def detect_risks_endpoint(request: LegalAnalysisRequest):
+    """Risk detection endpoint"""
+    try:
+        doc_url = str(request.document_url)
+        language = request.language or 'en'
+        
+        # Load and process document
+        await asyncio.get_event_loop().run_in_executor(executor, load_and_process_document, doc_url)
+        faiss_index, processed_texts, processed_metadatas = get_processed_data()
+        
+        if not processed_texts:
+            raise HTTPException(status_code=400, detail="Could not process document")
+        
+        # Combine all text
+        full_text = "\n\n".join(processed_texts)
+        
+        # Detect risks
+        risks = await legal_analyzer.detect_risks(full_text, language)
+        risk_summary = legal_analyzer.summarize_risks(risks)
+        
+        return {
+            "risks": risks,
+            "risk_summary": risk_summary,
+            "document_url": doc_url,
+            "language": language
+        }
+        
+    except Exception as e:
+        print(f"❌ Risk detection error: {e}")
+        raise HTTPException(status_code=500, detail=f"Risk detection error: {str(e)}")

@@ -1,10 +1,17 @@
-# RAG Document Q&A System
+# ⚖️ LegalEase AI - Legal Document Simplifier
 
-A high-performance Retrieval-Augmented Generation (RAG) system for intelligent document question-answering with hybrid search capabilities and multi-modal support.
+An AI-powered platform that demystifies complex legal documents, making them accessible to everyone. Built with Google Gemini and advanced RAG technology to protect users from unfavorable terms and legal risks.
 
 ## 🚀 Quick Start
 
-**Get started with setting up:** [📖 Setup Guide](SETUP.md)
+1. **Install dependencies**: `pip install -r requirements.txt`
+2. **Set your Gemini API key**: Add `GEMINI_API_KEY` to `.env`
+3. **Run the server**: `python main.py`
+4. **Open browser**: `http://localhost:8000`
+5. **Upload legal document**: Drag & drop or paste URL
+6. **Get insights**: View simplified version with risk highlights
+
+**Detailed setup:** [📖 Setup Guide](SETUP.md)
 
 ## 🛠️ Tech Stack
 
@@ -14,12 +21,11 @@ A high-performance Retrieval-Augmented Generation (RAG) system for intelligent d
 - **Uvicorn** - Lightning-fast ASGI server
 
 ### AI/ML Components
-- **BGE-M3** (`BAAI/bge-m3`) - State-of-the-art multilingual embedding model
-- **BGE Reranker v2-M3** (`BAAI/bge-reranker-v2-m3`) - Advanced semantic reranking
-- **Claude 3.5 Sonnet** - Primary LLM for text generation
-- **Claude 3 Haiku** - Vision model for image analysis
-- **Sentence Transformers** - Embedding framework
-- **PyTorch** - Deep learning backend with CUDA support
+- **Google Gemini 1.5 Pro** - Legal document analysis and simplification
+- **BGE-M3** (`BAAI/bge-m3`) - Multilingual legal text embeddings
+- **BGE Reranker v2-M3** - Semantic reranking for legal clauses
+- **Advanced Risk Detection** - AI-powered identification of unfavorable terms
+- **Multi-language Support** - Legal explanations in 8+ languages
 
 ### Vector Database & Search
 - **FAISS** - Facebook AI Similarity Search for vector operations
@@ -83,10 +89,10 @@ class RetrievalConfig:
 ```
 
 **🎛️ What You Can Configure:**
-- 🤖 **AI Models** - Switch between any embedding/LLM models
+- 🤖 **AI Models** - Gemini API settings, embedding models
 - 🔍 **Search Parameters** - Tune hybrid search weights & thresholds
-- 📊 **Processing Settings** - Chunk sizes, overlap, batch sizes
-- 🚀 **Performance** - Rate limits, timeouts, cache settings
+- 📊 **Processing Settings** - Chunk sizes, overlap, CPU-optimized batch sizes
+- 🚀 **Performance** - Rate limits, timeouts, cache settings (MacBook optimized)
 - 🛡️ **Security** - API keys, validation rules, content filters
 - 📁 **Storage** - Cache directories, log paths, temp folders
 
@@ -94,40 +100,43 @@ class RetrievalConfig:
 ```python
 # Change settings at runtime
 config.update_config('retrieval', semantic_weight=0.8)
-config.update_config('models', batch_size=64)
+config.update_config('models', batch_size=16)  # CPU optimized for MacBook
 ```
 
 ---
 
 ## ✨ Key Features
 
-### 🔍 Hybrid Search Engine
-- **Semantic Search**: Dense vector similarity using BGE-M3 embeddings
-- **Keyword Search**: BM25 algorithm for exact term matching
-- **Intelligent Fusion**: Configurable weights (70% semantic, 30% keyword)
-- **Reranking**: BGE reranker for optimal result ordering
+### ⚖️ Legal Document Simplification
+- **Plain Language Translation**: Convert legal jargon to everyday English
+- **Visual Risk Highlighting**: Red/yellow/green indicators for dangerous clauses
+- **Multi-language Support**: Explanations in Spanish, French, German, Hindi, Chinese, etc.
+- **Smart Clause Detection**: Automatically identify key terms, fees, penalties
 
-### 📄 Multi-Format Document Support
-- **PDF**: Text extraction with page-level metadata
-- **DOCX**: Full Word document processing
-- **PPTX**: Slide content + AI-powered image analysis
-- **XLSX**: Advanced spreadsheet processing with malicious content detection
-- **HTML/TXT/CSV**: Web and plain text formats
-- **EML**: Email message processing
-- **Images**: Direct image analysis via vision models
+### 🚨 Advanced Risk Detection
+- **🔴 High Risk**: Hidden fees, penalties, automatic renewals, unlimited liability
+- **🟡 Medium Risk**: Unclear obligations, restrictive conditions, ambiguous terms
+- **🟢 Low Risk**: Standard terms, fair conditions, balanced agreements
+- **Risk Categories**: Financial, liability, termination, renewal risks
 
-### 🧠 Intelligent Processing Pipeline
-- **Adaptive Strategy**: Automatically switches between RAG and full-text based on document size
-- **Batch Processing**: Concurrent question processing for optimal performance
-- **Smart Chunking**: Recursive text splitting with configurable overlap
-- **Context Optimization**: Dynamic context window management
+### 📄 Legal Document Support
+- **Contracts**: Rental agreements, employment contracts, service agreements
+- **Financial**: Loan documents, credit agreements, insurance policies
+- **Digital**: Terms of service, privacy policies, software licenses
+- **Business**: Partnership agreements, NDAs, vendor contracts
+
+### 🧠 Intelligent Legal Analysis
+- **Document Simplification**: AI-powered conversion to plain language
+- **Risk Assessment**: Comprehensive analysis of potentially harmful clauses
+- **Interactive Q&A**: Ask specific questions about your legal documents
+- **Contextual Understanding**: Deep comprehension of legal implications
 
 ### 🚀 Performance Optimizations
-- **GPU Acceleration**: CUDA support for embeddings and reranking
+- **CPU Optimization**: MacBook-optimized processing for embeddings and reranking
 - **Async Processing**: Non-blocking I/O operations
 - **Rate Limiting**: Configurable API call throttling
 - **Memory Management**: Efficient caching and cleanup
-- **Batch Embeddings**: Process multiple queries simultaneously
+- **Batch Embeddings**: Process multiple queries simultaneously with CPU-optimized batch sizes
 
 ### 🛡️ Security & Reliability
 - **Content Filtering**: Advanced malicious prompt detection
@@ -158,9 +167,9 @@ Text Chunks → BGE-M3 Encoder → 1024-dim Vectors → FAISS Index → Cache St
 Questions → Batch Embedding → Hybrid Search → Candidate Retrieval → Reranking
 ```
 
-### 5. Answer Generation
+### 5. Legal Analysis
 ```
-Context + Question → Document-Specific Prompts → Claude 3.5 → Response → Logging
+Legal Document → Risk Detection → Plain Language Simplification → Visual Highlighting → User Interface
 ```
 
 ## 🔧 System Architecture
@@ -178,11 +187,11 @@ Context + Question → Document-Specific Prompts → Claude 3.5 → Response →
 - Hybrid search combining semantic + keyword matching
 - BGE reranker for result optimization
 
-**AI Inference Layer**
-- Claude 3.5 Sonnet for text generation
-- Claude 3 Haiku for vision tasks
-- Document-specific system prompts
-- Adaptive context management
+**Legal AI Layer**
+- Google Gemini 1.5 Pro for legal document analysis
+- Legal-specific prompts for risk detection and simplification
+- Multi-language legal translation
+- CPU-optimized processing for MacBook
 
 **API & Service Layer**
 - FastAPI with async request handling
@@ -212,7 +221,7 @@ Centralized configuration system with:
 3. **Format Detection**: Extension-based loader selection
 4. **Content Extraction**: Format-specific parsing
 5. **Text Processing**: Cleaning, chunking, and metadata addition
-6. **Embedding Generation**: BGE-M3 vectorization with GPU acceleration
+6. **Embedding Generation**: BGE-M3 vectorization with CPU optimization for MacBook
 7. **Index Creation**: FAISS index construction and caching
 8. **Query Processing**: Batch question embedding and hybrid search
 9. **Context Retrieval**: Top-k candidates with reranking
@@ -227,7 +236,7 @@ Centralized configuration system with:
 
 ### Performance Optimizations
 - **Concurrent Processing**: Parallel question handling
-- **Memory Management**: GPU memory optimization with fallbacks
+- **Memory Management**: CPU memory optimization for MacBook
 - **Batch Operations**: Efficient embedding generation
 - **Smart Caching**: Multi-level cache hierarchy
 - **Resource Pooling**: Connection and thread pool management
@@ -236,11 +245,39 @@ Centralized configuration system with:
 
 - **Chunk Size**: 512 tokens with 150 token overlap
 - **Embedding Dimension**: 1024 (BGE-M3)
+- **Batch Size**: 16 (CPU optimized for MacBook)
 - **Retrieval**: Top-20 candidates → Top-10 after reranking
 - **Context Limit**: 10,000 tokens maximum
 - **Small Doc Threshold**: 5,000 tokens (bypass RAG)
 - **Hybrid Weights**: 70% semantic, 30% keyword
 - **Rate Limits**: 20 LLM calls, 1 image call concurrent
 - **Cache TTL**: 24 hours with 10GB limit
+- **Device**: CPU optimized for MacBook performance
+- **Languages**: English, Spanish, French, German, Italian, Portuguese, Hindi, Chinese
+- **Risk Categories**: Financial, Liability, Termination, Renewal, General
+- **Document Types**: Contracts, Agreements, Terms of Service, Legal PDFs
 
-This system delivers enterprise-grade document Q&A capabilities with state-of-the-art AI models, optimized for both accuracy and performance.
+## 🎯 Real-World Impact
+
+**Protects Users From:**
+- Hidden fees and penalties in contracts
+- Predatory loan terms and conditions
+- Unfair rental agreement clauses
+- Automatic renewals and cancellation traps
+- Unlimited liability exposure
+
+**Empowers Users With:**
+- Plain language explanations of complex terms
+- Visual risk indicators for dangerous clauses
+- Multi-language accessibility
+- Interactive Q&A for specific concerns
+- Informed decision-making tools
+
+**Use Cases:**
+- 🏠 **Rental Agreements**: Understand lease terms, fees, and tenant rights
+- 💰 **Loan Contracts**: Identify interest rates, penalties, and payment terms
+- 📱 **Terms of Service**: Decode privacy policies and user agreements
+- 💼 **Employment Contracts**: Clarify obligations, benefits, and termination clauses
+- 🛡️ **Insurance Policies**: Understand coverage, exclusions, and claim processes
+
+This platform democratizes legal understanding, helping ordinary people protect themselves from unfavorable terms and make informed decisions about important legal documents.
