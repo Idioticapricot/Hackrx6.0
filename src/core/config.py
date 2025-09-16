@@ -35,7 +35,7 @@ class APIConfig:
 class ModelConfig:
     """AI model specifications"""
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    reranker_model: str = "jinaai/jina-reranker-v1-tiny-en"
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     llm_model: str = "gemini-1.5-flash"
     llm_vision_model: str = "gemini-1.5-flash"
     embedding_dim: int = 1024
